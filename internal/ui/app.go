@@ -56,6 +56,10 @@ func Run() {
 
 	serviceList := tview.NewList().ShowSecondaryText(false)
 	serviceList.SetBorder(true).SetTitle(" Services ")
+	serviceList.SetSelectedBackgroundColor(tcell.ColorDeepSkyBlue)
+	serviceList.SetSelectedTextColor(tcell.ColorBlack)
+	serviceList.SetMainTextColor(tcell.ColorWhite)
+
 	refreshServices(serviceList, cfg)
 
 	logView := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
