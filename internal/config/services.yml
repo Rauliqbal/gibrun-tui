@@ -1,0 +1,21 @@
+apache:
+  ports: [80, 443]
+  services:
+    arch: httpd
+    endeavouros: httpd
+    fedora: httpd
+    ubuntu: apache2
+    debian: apache2
+
+mysql:
+  ports: [3306]
+  services:
+    arch: mariadb
+    endeavouros: mysqld
+    fedora: mysqld
+    ubuntu: mysql
+    debian: mysql
+
+postgresql:
+  services:
+    arch: postgresql
