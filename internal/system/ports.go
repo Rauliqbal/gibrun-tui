@@ -1,16 +1,32 @@
 package system
 
 import (
-	"fmt"
-	"net"
-	"time"
+	"os/exec"
+	"regexp"
+	"strings"
 )
 
-func PortOpen(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
-	if err != nil {
-		return false
+func GetPortUsage(svcName string) string {
+	cmd := exec.Command("pgrep", svcName)
+	pid, err := cmd.Output()
+	if err != nil || len(pid) == 0 {
+		return "N/A"
 	}
-	conn.Close()
-	return true
+
+	ssCmd := exec.Command("sudo", "ss", "-tulpn")
+	output, _ := ssCmd.Output()
+
+	cleanPid := strings.TrimSpace(string(pid))
+	lines := strings.Split(string(output), "\n")
+
+	for _, line := range lines {
+		if strings.Contains(line, "pid="+cleanPid) {
+			re := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+:(\d+)|\[::\]:(\d+)`)
+			match := re.FindStringSubmatch(line)
+			if len(match) > 0 {
+				return match[0]
+			}
+		}
+	}
+	return "Scanning..."
 }
