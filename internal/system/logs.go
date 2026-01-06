@@ -12,12 +12,18 @@ func StreamLogs(ctx context.Context, svcName string) <-chan string {
 	go func() {
 		defer close(logChan)
 
+		// Menggunakan CommandContext agar proses journalctl mati saat context di-cancel
 		cmd := exec.CommandContext(ctx, "journalctl", "-u", svcName, "-f", "-n", "20")
-		stdout, _ := cmd.StdoutPipe()
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return
+		}
+
 		if err := cmd.Start(); err != nil {
 			return
 		}
 
+		// Scan baris demi baris
 		scanner := bufio.NewScanner(stdout)
 		go func() {
 			for scanner.Scan() {
@@ -29,6 +35,7 @@ func StreamLogs(ctx context.Context, svcName string) <-chan string {
 			}
 		}()
 
+		// Tunggu context selesai (akibat cancelLog() di UI)
 		<-ctx.Done()
 		cmd.Process.Kill()
 		cmd.Wait()

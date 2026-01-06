@@ -13,6 +13,10 @@ import (
 	"github.com/rivo/tview"
 )
 
+// VERSION
+var Version = "0.1.0"
+
+// Helper untuk membersihkan label list agar mendapatkan key service murni
 func cleanServiceName(text string) string {
 	re := regexp.MustCompile(`\[[^\]]*\]`)
 	clean := re.ReplaceAllString(text, "")
@@ -21,9 +25,9 @@ func cleanServiceName(text string) string {
 	return strings.TrimSpace(clean)
 }
 
+// Merender teks untuk item di list service
 func renderService(key string, cfg config.Services) string {
 	svc := system.ResolveService(cfg, key)
-	// Check if installed
 	if !system.IsInstalled(svc) {
 		return "[gray]○ [darkgray]" + key + " [red](Not Installed)"
 	}
@@ -37,10 +41,6 @@ func refreshServices(list *tview.List, cfg config.Services) {
 	currentIndex := list.GetCurrentItem()
 	list.Clear()
 
-	if cfg == nil || len(cfg) == 0 {
-		return
-	}
-
 	var keys []string
 	for k := range cfg {
 		keys = append(keys, k)
@@ -48,62 +48,55 @@ func refreshServices(list *tview.List, cfg config.Services) {
 	sort.Strings(keys)
 
 	for _, key := range keys {
-		// Pastikan renderService mengembalikan string yang valid
 		label := renderService(key, cfg)
 		list.AddItem(label, "", 0, nil)
 	}
 
 	if currentIndex >= 0 && currentIndex < list.GetItemCount() {
 		list.SetCurrentItem(currentIndex)
-	} else if list.GetItemCount() > 0 {
-		list.SetCurrentItem(0)
 	}
 }
 
 func Run() {
 	app := tview.NewApplication()
-	cfg, _ := config.Load("internal/config/services.yml")
-
-	stopLogChan := make(chan struct{}, 1)
-
-	if len(cfg) == 0 {
-		fmt.Println("DEBUG: Config terbaca tapi kosong!")
+	cfg, err := config.Load("internal/config/services.yml")
+	if err != nil {
+		panic(err)
 	}
 
+	// State Management untuk Log
+	var cancelLog context.CancelFunc
+
+	// UI Components
 	header := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
-	distroName := system.DetectDistro()
-	header.SetText(fmt.Sprintf("[yellow]⚡ GibRun[white] — Distro: [blue]%s", distroName))
+	distro := system.DetectDistro()
+	header.SetText(fmt.Sprintf("[yellow]⚡ GibRun[white] — Distro: [blue]%s", distro))
 
 	serviceList := tview.NewList().ShowSecondaryText(false)
-	serviceList.SetBorder(true).SetTitle(" Services ")
 	serviceList.SetSelectedBackgroundColor(tcell.ColorDeepSkyBlue)
+	serviceList.SetBorder(true).SetTitle(" Services ")
 
 	logView := tview.NewTextView().SetDynamicColors(true).SetScrollable(true).SetRegions(true)
 	logView.SetBorder(true).SetTitle(" Realtime Logs & Info ")
 
-	footer := tview.NewTextView().SetDynamicColors(true)
-	footer.SetText("[::b]S[white]: Start  [::b]R[white]: Restart  [::b]X[white]: Stop  [::b]I[white]: Install  [::b]Q[white]: Quit")
+	// Footer
+	footerMenu := tview.NewTextView().SetDynamicColors(true)
+	footerMenu.SetText("[::b]S[white]: Start  [::b]R[white]: Restart  [::b]X[white]: Stop  [::b]I[white]: Install  [::b]Q[white]: Quit")
 
-	var cancelLog context.CancelFunc
+	footerVersion := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignRight)
+	footerVersion.SetText(fmt.Sprintf("[gray]v%s", Version))
 
-	// Fungsi untuk memantau log secara realtime
+	footerWrapper := tview.NewFlex().AddItem(footerMenu, 0, 1, false).AddItem(footerVersion, 15, 0, false)
+
+	// Main Logic: Update Info & Streaming Log
 	updateInfo := func() {
+		// 1. Cancel log goroutine sebelumnya
 		if cancelLog != nil {
 			cancelLog()
 		}
 
-		select {
-		case stopLogChan <- struct{}{}:
-		default:
-		}
-
-		if serviceList.GetItemCount() == 0 {
-			logView.SetText("No services found in configuration.")
-			return
-		}
-
 		idx := serviceList.GetCurrentItem()
-		if idx < 0 || idx >= serviceList.GetItemCount() {
+		if idx < 0 {
 			return
 		}
 
@@ -111,38 +104,29 @@ func Run() {
 		key := cleanServiceName(fullText)
 		svcName := system.ResolveService(cfg, key)
 
-		if key == "" {
-			return
-		}
-
-		select {
-		case stopLogChan <- struct{}{}:
-		default:
-		}
-
-		var ctx context.Context
-		ctx, cancelLog = context.WithCancel(context.Background())
-
 		logView.Clear()
 
 		if !system.IsInstalled(svcName) {
-			logView.SetText("[red]Service not installed.")
+			fmt.Fprintf(logView, "\n [red]Service '%s' belum terinstall di %s.\n [white]Tekan 'I' untuk instalasi.", key, distro)
 			return
 		}
 
-		// Tampilkan Meta Info (Port & Uptime)
-		port := system.GetPortUsage(svcName) // Dari ports.go
-		uptime := system.GetUptime(svcName)  // Dari service.go / uptime logic
-		statusHeader := fmt.Sprintf("[yellow]Service:[white] %s | [yellow]Port:[white] %s | [yellow]Uptime:[white] %s\n%s\n",
+		// 2. Tampilkan Meta Info
+		port := system.GetPortUsage(svcName)
+		uptime := system.GetUptime(svcName)
+		fmt.Fprintf(logView, "[yellow]Service:[white] %s | [yellow]Port:[white] %s | [yellow]Uptime:[white] %s\n%s\n",
 			key, port, uptime, strings.Repeat("─", 50))
 
-		logView.SetText(statusHeader)
+		// 3. Start New Log Stream dengan Context
+		var ctx context.Context
+		ctx, cancelLog = context.WithCancel(context.Background())
 
-		// Stream Realtime Log (Dari logs.go)
 		go func() {
 			logChan := system.StreamLogs(ctx, svcName)
 			for {
 				select {
+				case <-ctx.Done():
+					return
 				case line, ok := <-logChan:
 					if !ok {
 						return
@@ -150,73 +134,78 @@ func Run() {
 					app.QueueUpdateDraw(func() {
 						fmt.Fprintf(logView, "%s\n", line)
 					})
-				case <-stopLogChan: // Berhenti jika ada sinyal pindah service
-					return
 				}
 			}
 		}()
 	}
 
+	// Event Handlers
 	serviceList.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		updateInfo()
 	})
 
 	serviceList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		idx := serviceList.GetCurrentItem()
+		if idx < 0 {
+			return event
+		}
+
 		fullText, _ := serviceList.GetItemText(idx)
 		key := cleanServiceName(fullText)
 		svc := system.ResolveService(cfg, key)
-
-		if serviceList.GetItemCount() == 0 {
-			return event
-		}
-
-		if idx < 0 || idx >= serviceList.GetItemCount() {
-			return event
-		}
 
 		switch event.Rune() {
 		case 'q', 'Q':
 			app.Stop()
 		case 'i', 'I':
-			logView.SetText(fmt.Sprintf("[yellow]Installing %s...\n", key))
+			logView.SetText(fmt.Sprintf("[yellow]Installing %s...", key))
 			go func() {
 				output, err := system.InstallService(svc)
-
 				app.QueueUpdateDraw(func() {
 					if err != nil {
-						// Tampilkan pesan error dan output terminal agar user tahu kenapa gagal
-						fmt.Fprintf(logView, "[red]Gagal install: %v\n[white]%s", err, string(output))
+						fmt.Fprintf(logView, "\n[red]Error: %v\n%s", err, string(output))
 					} else {
-						fmt.Fprintf(logView, "[green]Instalasi %s berhasil!\n[white]%s", key, string(output))
+						fmt.Fprintf(logView, "\n[green]Sukses!\n%s", string(output))
 						refreshServices(serviceList, cfg)
-						updateInfo()
 					}
 				})
 			}()
-			return nil
-		case 's', 'S':
+		case 's', 'S', 'r', 'R', 'x', 'X':
 			go func() {
-				system.Start(svc)
-				app.QueueUpdateDraw(func() { refreshServices(serviceList, cfg); updateInfo() })
-			}()
-		case 'r', 'R':
-			go func() {
-				system.Restart(svc)
-				app.QueueUpdateDraw(func() { refreshServices(serviceList, cfg); updateInfo() })
-			}()
-		case 'x', 'X':
-			go func() {
-				system.Stop(svc)
-				app.QueueUpdateDraw(func() { refreshServices(serviceList, cfg); updateInfo() })
+				switch event.Rune() {
+				case 's', 'S':
+					system.Start(svc)
+				case 'r', 'R':
+					system.Restart(svc)
+				case 'x', 'X':
+					system.Stop(svc)
+				}
+				app.QueueUpdateDraw(func() {
+					refreshServices(serviceList, cfg)
+					updateInfo()
+				})
 			}()
 		}
 		return event
 	})
 
+	// Initial Load
 	refreshServices(serviceList, cfg)
+	updateInfo()
+
+	// Layouting
 	mainFlex := tview.NewFlex().AddItem(serviceList, 0, 1, true).AddItem(logView, 0, 2, false)
-	root := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(header, 1, 0, false).AddItem(mainFlex, 0, 1, true).AddItem(footer, 1, 0, false)
+	root := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(header, 1, 0, false).
+		AddItem(mainFlex, 0, 1, true).
+		AddItem(footerWrapper, 1, 0, false)
+
+	// Final Cleanup saat aplikasi exit
+	defer func() {
+		if cancelLog != nil {
+			cancelLog()
+		}
+	}()
 
 	if err := app.SetRoot(root, true).SetFocus(serviceList).Run(); err != nil {
 		panic(err)
