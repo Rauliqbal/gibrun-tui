@@ -24,7 +24,7 @@ BOLD='\033[1m'
 
 # === 3. Header ===
 clear
-echo -e "${BLUE}${BOLD}⚡ GibRun Installer (v$VERSION)${NC}"
+echo -e "${BLUE}${BOLD}⚡ GibRun Installer ($VERSION)${NC}"
 echo -e "${BLUE}======================================${NC}"
 
 # === 4. Pengecekan Root (Auto-Sudo) ===
