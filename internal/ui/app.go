@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -23,6 +25,16 @@ func cleanServiceName(text string) string {
 	clean = strings.ReplaceAll(clean, "●", "")
 	clean = strings.ReplaceAll(clean, "○", "")
 	return strings.TrimSpace(clean)
+}
+
+// Mendapatkan path config secara dinamis di ~/.config/gibrun/services.yml
+func getConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback ke local jika home directory tidak terbaca
+		return "services.yml"
+	}
+	return filepath.Join(home, ".config", "gibrun", "services.yml")
 }
 
 // Merender teks untuk item di list service
@@ -58,11 +70,18 @@ func refreshServices(list *tview.List, cfg config.Services) {
 }
 
 func Run() {
-	app := tview.NewApplication()
-	cfg, err := config.Load("internal/config/services.yml")
+	// 1. Ambil path dinamis
+	configPath := getConfigPath()
+
+	// 2. Load Config menggunakan path dinamis (tidak lagi hardcoded ke internal/...)
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		panic(err)
+		fmt.Printf("❌ Error: Gagal memuat konfigurasi di %s\n", configPath)
+		fmt.Println("Pastikan Anda telah menjalankan installer atau file services.yml tersedia.")
+		os.Exit(1)
 	}
+
+	app := tview.NewApplication()
 
 	// State Management untuk Log
 	var cancelLog context.CancelFunc
@@ -90,7 +109,6 @@ func Run() {
 
 	// Main Logic: Update Info & Streaming Log
 	updateInfo := func() {
-		// 1. Cancel log goroutine sebelumnya
 		if cancelLog != nil {
 			cancelLog()
 		}
@@ -111,13 +129,11 @@ func Run() {
 			return
 		}
 
-		// 2. Tampilkan Meta Info
 		port := system.GetPortUsage(svcName)
 		uptime := system.GetUptime(svcName)
 		fmt.Fprintf(logView, "[yellow]Service:[white] %s | [yellow]Port:[white] %s | [yellow]Uptime:[white] %s\n%s\n",
 			key, port, uptime, strings.Repeat("─", 50))
 
-		// 3. Start New Log Stream dengan Context
 		var ctx context.Context
 		ctx, cancelLog = context.WithCancel(context.Background())
 
@@ -200,7 +216,6 @@ func Run() {
 		AddItem(mainFlex, 0, 1, true).
 		AddItem(footerWrapper, 1, 0, false)
 
-	// Final Cleanup saat aplikasi exit
 	defer func() {
 		if cancelLog != nil {
 			cancelLog()
