@@ -11,6 +11,9 @@ readonly INSTALL_DIR="/usr/local/bin"
 readonly POLKIT_RULE="/etc/polkit-1/rules.d/49-gibrun.rules"
 readonly GROUP="gibrun"
 
+# URL Mentah (Raw) untuk download file pendukung
+readonly RAW_URL="https://raw.githubusercontent.com/$REPO/main"
+
 # === 2. Warna untuk UI ===
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
@@ -27,7 +30,6 @@ echo -e "${BLUE}======================================${NC}"
 # === 4. Pengecekan Root (Auto-Sudo) ===
 if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}🔐 Memerlukan hak akses root. Meminta sudo...${NC}"
-    # Gunakan -E agar environment (seperti HOME) bisa diproses dengan benar
     exec sudo -E bash "$0" "$@"
     exit $?
 fi
@@ -51,7 +53,6 @@ if [ ! -f "./$BIN_NAME" ]; then
     
     if ! curl -fsSL "$URL" -o "$BIN_NAME"; then
         echo -e "${RED}❌ Gagal mengunduh binary.${NC}"
-        echo -e "Pastikan Release ${YELLOW}$VERSION${NC} tersedia di GitHub."
         exit 1
     fi
     chmod +x "$BIN_NAME"
@@ -62,21 +63,24 @@ echo -e "${BLUE}📦 Menyalin binary ke $INSTALL_DIR...${NC}"
 install -m 755 "$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
 
 # === 7. Setup Konfigurasi (~/.config/gibrun) ===
-echo -e "${BLUE}⚙️  Menyiapkan folder konfigurasi...${NC}"
+echo -e "${BLUE}⚙️  Menyiapkan folder konfigurasi di $CONFIG_DIR...${NC}"
 mkdir -p "$CONFIG_DIR"
 
-# Coba cari file config di folder lokal saat ini
-if [ -f "internal/config/services.yml" ]; then
-    cp internal/config/services.yml "$CONFIG_DIR/services.yml"
-elif [ -f "services.yml" ]; then
-    cp services.yml "$CONFIG_DIR/services.yml"
+# LOGIKA BARU: Ambil config dari GitHub jika tidak ada di lokal
+if [ ! -f "$CONFIG_DIR/services.yml" ]; then
+    echo -e "${BLUE}📄 Mengunduh default services.yml dari GitHub...${NC}"
+    # Pastikan path internal/config/services.yml sesuai dengan struktur repo Anda
+    if ! curl -fsSL "$RAW_URL/internal/config/services.yml" -o "$CONFIG_DIR/services.yml"; then
+        # Jika path di atas salah, coba path alternatif (root folder)
+        curl -fsSL "$RAW_URL/services.yml" -o "$CONFIG_DIR/services.yml" || echo -e "${RED}⚠️  Gagal mengunduh config.${NC}"
+    fi
 else
-    echo -e "${YELLOW}⚠️  Peringatan: services.yml tidak ditemukan di folder lokal.${NC}"
-    echo -e "   Pastikan file tersebut ada agar aplikasi tidak panic."
+    echo -e "${YELLOW}ℹ️  File services.yml sudah ada, melewati pengunduhan.${NC}"
 fi
 
 # Kembalikan kepemilikan folder config ke user biasa
 chown -R "$REAL_USER:$REAL_USER" "$CONFIG_DIR"
+chmod 644 "$CONFIG_DIR/services.yml"
 
 # === 8. Setup Grup & Izin Polkit ===
 echo -e "${BLUE}🔐 Mengatur izin Polkit & Grup...${NC}"
@@ -84,10 +88,8 @@ if ! getent group "$GROUP" >/dev/null; then
     groupadd "$GROUP"
 fi
 
-# Daftarkan user ke grup gibrun
 usermod -aG "$GROUP" "$REAL_USER"
 
-# Menulis aturan Polkit (Agar bisa manage systemd tanpa password)
 cat > "$POLKIT_RULE" <<EOF
 polkit.addRule(function(action, subject) {
     if (action.id === "org.freedesktop.systemd1.manage-units" && subject.isInGroup("$GROUP")) {
@@ -97,14 +99,10 @@ polkit.addRule(function(action, subject) {
 EOF
 chmod 644 "$POLKIT_RULE"
 
-# === 9. Selesai (UX Final) ===
+# === 9. Selesai ===
 echo -e "\n${GREEN}${BOLD}✨ Instalasi Berhasil Selesai!${NC}"
 echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "👤 User: ${YELLOW}$REAL_USER${NC}"
 echo -e "📂 Config: ${YELLOW}$CONFIG_DIR/services.yml${NC}"
-echo -e "⚙️  Grup: ${YELLOW}$GROUP${NC} (Akses Systemd aktif)"
 echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "\n${BLUE}${BOLD}👉 Penting:${NC}"
-echo -e "Agar perubahan grup aktif tanpa logout, jalankan perintah ini:"
-echo -e "${YELLOW}newgrp $GROUP${NC}"
-echo -e "\nLalu jalankan aplikasi dengan mengetik: ${GREEN}$BIN_NAME${NC}"
+echo -e "\n${BLUE}${BOLD}👉 Langkah Terakhir:${NC}"
+echo -e "${YELLOW}newgrp $GROUP && $BIN_NAME${NC}\n"
