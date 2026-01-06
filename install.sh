@@ -21,7 +21,14 @@ echo -e "${BLUE}⚡ Menyiapkan instalasi $BIN_NAME...${NC}"
 # 1. Self-Elevate (Auto-Sudo)
 if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}🔐 Memerlukan hak akses root. Meminta sudo...${NC}"
-    exec sudo bash "$0" "$@"
+    if [ "$0" = "sh" ] || [ "$0" = "bash" ] || [ "$0" = "-" ]; then
+        tmp_script=$(mktemp)
+        cat > "$tmp_script"
+        sudo bash "$tmp_script" "$@"
+        rm "$tmp_script"
+    else
+        exec sudo bash "$0" "$@"
+    fi
     exit $?
 fi
 
