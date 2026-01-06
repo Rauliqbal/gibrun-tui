@@ -89,7 +89,7 @@ func Run() {
 	// UI Components
 	header := tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignCenter)
 	distro := system.DetectDistro()
-	header.SetText(fmt.Sprintf("[yellow]⚡ GibRun[white] — Distro: [blue]%s", distro))
+	header.SetText("[yellow]⚡ GibRun[white] — Service Control for Linux")
 
 	serviceList := tview.NewList().ShowSecondaryText(false)
 	serviceList.SetSelectedBackgroundColor(tcell.ColorDeepSkyBlue)
