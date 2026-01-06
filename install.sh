@@ -1,43 +1,43 @@
 #!/usr/bin/env bash
 
+# Keluar jika ada error
 set -e
 
-# === Konfigurasi ===
-BIN_NAME="gibrun"
-INSTALL_DIR="/usr/local/bin"
-POLKIT_RULE="/etc/polkit-1/rules.d/49-gibrun.rules"
-GROUP="gibrun"
-REPO="Rauliqbal/gibrun-tui"
-VERSION="v0.1.0" # Ganti sesuai versi rilis Anda
+# === 1. Konfigurasi Utama ===
+readonly REPO="Rauliqbal/gibrun-tui"
+readonly VERSION="v0.1.0"
+readonly BIN_NAME="gibrun"
+readonly INSTALL_DIR="/usr/local/bin"
+readonly POLKIT_RULE="/etc/polkit-1/rules.d/49-gibrun.rules"
+readonly GROUP="gibrun"
 
-# === Warna untuk UI ===
+# === 2. Warna untuk UI ===
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 BOLD='\033[1m'
 
-echo -e "${BLUE}${BOLD}⚡ GibRun Installer${NC}"
-echo -e "${BLUE}============================${NC}"
+# === 3. Header ===
+clear
+echo -e "${BLUE}${BOLD}⚡ GibRun Installer (v$VERSION)${NC}"
+echo -e "${BLUE}======================================${NC}"
 
-# 1. Self-Elevate (Auto-Sudo) - Kompatibel dengan Pipe & Local
+# === 4. Pengecekan Root (Auto-Sudo) ===
 if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}🔐 Memerlukan hak akses root. Meminta sudo...${NC}"
-    if [ ! -f "$0" ]; then
-        # Jika dijalankan via pipe (curl | bash), simpan sementara
-        TMP_FILE=$(mktemp /tmp/gibrun-install.XXXXXX.sh)
-        cat > "$TMP_FILE"
-        sudo bash "$TMP_FILE" "$@"
-        rm -f "$TMP_FILE"
-    else
-        # Jika dijalankan sebagai file lokal (./install.sh)
-        exec sudo bash "$0" "$@"
-    fi
+    # Gunakan -E agar environment (seperti HOME) bisa diproses dengan benar
+    exec sudo -E bash "$0" "$@"
     exit $?
 fi
 
-# 2. Deteksi Arsitektur & Download Binary
+# Variabel User (Penting untuk konfigurasi lokal)
+REAL_USER=${SUDO_USER:-$(whoami)}
+USER_HOME=$(eval echo "~$REAL_USER")
+CONFIG_DIR="$USER_HOME/.config/gibrun"
+
+# === 5. Deteksi Arsitektur & Download Binary ===
 if [ ! -f "./$BIN_NAME" ]; then
     ARCH=$(uname -m)
     case $ARCH in
@@ -47,54 +47,64 @@ if [ ! -f "./$BIN_NAME" ]; then
     esac
 
     echo -e "${BLUE}📥 Mengunduh binary [$ARCH] dari GitHub...${NC}"
-    # Link mengarah ke release assets
     URL="https://github.com/$REPO/releases/download/$VERSION/$BIN_NAME"
     
     if ! curl -fsSL "$URL" -o "$BIN_NAME"; then
         echo -e "${RED}❌ Gagal mengunduh binary.${NC}"
-        echo -e "Pastikan Release ${YELLOW}$VERSION${NC} sudah dipublish di GitHub."
+        echo -e "Pastikan Release ${YELLOW}$VERSION${NC} tersedia di GitHub."
         exit 1
     fi
     chmod +x "$BIN_NAME"
 fi
 
-# 3. Instalasi Binary
+# === 6. Instalasi Binary ke Sistem ===
 echo -e "${BLUE}📦 Menyalin binary ke $INSTALL_DIR...${NC}"
 install -m 755 "$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
 
-# 4. Konfigurasi Grup & Polkit
-echo -e "${BLUE}👥 Mengatur grup sistem & izin Polkit...${NC}"
-if ! getent group "$GROUP" >/dev/null; then
-    groupadd "$GROUP"
-    echo -e "  - Grup ${GREEN}$GROUP${NC} berhasil dibuat"
+# === 7. Setup Konfigurasi (~/.config/gibrun) ===
+echo -e "${BLUE}⚙️  Menyiapkan folder konfigurasi...${NC}"
+mkdir -p "$CONFIG_DIR"
+
+# Coba cari file config di folder lokal saat ini
+if [ -f "internal/config/services.yml" ]; then
+    cp internal/config/services.yml "$CONFIG_DIR/services.yml"
+elif [ -f "services.yml" ]; then
+    cp services.yml "$CONFIG_DIR/services.yml"
+else
+    echo -e "${YELLOW}⚠️  Peringatan: services.yml tidak ditemukan di folder lokal.${NC}"
+    echo -e "   Pastikan file tersebut ada agar aplikasi tidak panic."
 fi
 
-# Tulis rule Polkit agar manage service tidak minta password
+# Kembalikan kepemilikan folder config ke user biasa
+chown -R "$REAL_USER:$REAL_USER" "$CONFIG_DIR"
+
+# === 8. Setup Grup & Izin Polkit ===
+echo -e "${BLUE}🔐 Mengatur izin Polkit & Grup...${NC}"
+if ! getent group "$GROUP" >/dev/null; then
+    groupadd "$GROUP"
+fi
+
+# Daftarkan user ke grup gibrun
+usermod -aG "$GROUP" "$REAL_USER"
+
+# Menulis aturan Polkit (Agar bisa manage systemd tanpa password)
 cat > "$POLKIT_RULE" <<EOF
 polkit.addRule(function(action, subject) {
-    if (
-        action.id === "org.freedesktop.systemd1.manage-units" &&
-        subject.isInGroup("$GROUP")
-    ) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" && subject.isInGroup("$GROUP")) {
         return polkit.Result.YES;
     }
 });
 EOF
 chmod 644 "$POLKIT_RULE"
 
-# 5. Daftarkan User ke Grup
-CURRENT_USER=${SUDO_USER:-$(whoami)}
-if [ "$CURRENT_USER" != "root" ]; then
-    usermod -aG "$GROUP" "$CURRENT_USER"
-fi
-
-# 6. Selesai
+# === 9. Selesai (UX Final) ===
 echo -e "\n${GREEN}${BOLD}✨ Instalasi Berhasil Selesai!${NC}"
 echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "👤 User: ${YELLOW}$CURRENT_USER${NC}"
-echo -e "⚙️  Grup: ${YELLOW}$GROUP${NC} (Akses Systemd diaktifkan)"
+echo -e "👤 User: ${YELLOW}$REAL_USER${NC}"
+echo -e "📂 Config: ${YELLOW}$CONFIG_DIR/services.yml${NC}"
+echo -e "⚙️  Grup: ${YELLOW}$GROUP${NC} (Akses Systemd aktif)"
 echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "\n${BLUE}${BOLD}👉 Langkah Terakhir:${NC}"
+echo -e "\n${BLUE}${BOLD}👉 Penting:${NC}"
 echo -e "Agar perubahan grup aktif tanpa logout, jalankan perintah ini:"
-echo -e "${GREEN}newgrp $GROUP${NC}"
+echo -e "${YELLOW}newgrp $GROUP${NC}"
 echo -e "\nLalu jalankan aplikasi dengan mengetik: ${GREEN}$BIN_NAME${NC}"

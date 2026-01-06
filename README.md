@@ -1,6 +1,6 @@
 # Install
 
-`curl -fsSL https://raw.githubusercontent.com/Rauliqbal/gibrun-tui/main/install.sh | sudo bash -s --`
+`curl -fsSL https://raw.githubusercontent.com/Rauliqbal/gibrun-tui/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh && rm install.sh`
 
 # Uninstall 
 `./uninstall.sh`
