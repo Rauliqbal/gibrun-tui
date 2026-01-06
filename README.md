@@ -26,7 +26,7 @@ bash install.sh
 rm install.sh
 ```
 
-**Penting**: Setelah instalasi selesai, jalankan perintah newgrp gibrun atau restart terminal Anda agar izin grup baru aktif.
+**Penting**: Setelah instalasi selesai, jalankan perintah `newgrp gibrun` atau restart terminal Anda agar izin grup baru aktif.
 
 
 ## ⚙️ Konfigurasi
